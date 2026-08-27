@@ -4,16 +4,14 @@ import NavBar from "../layouts/Navbar";
 import Sidebar from "../layouts/Sidebar";
 import { useAuth } from "../context/AuthContext";
 
-/* ================= QUERIES ================= */
+/* ================= QUERIES E MUTATIONS ================= */
 
-// Busca estatísticas numéricas e dados do gráfico (formatados como JSON pelo Django)
 const GET_DASHBOARD_STATS = gql`
   query DashboardStats {
     dashboardStats
   }
 `;
 
-// Busca a lista detalhada de notificações para o Mural
 const GET_NOTIFICATIONS = gql`
   query Notifications {
     myNotifications {
@@ -43,21 +41,15 @@ export default function Dashboard() {
   const { user, loading: userLoading } = useAuth();
 
   // Query de Estatísticas
-  const { data: statsData, refetch: refetchStats } = useQuery(
-    GET_DASHBOARD_STATS,
-    {
-      fetchPolicy: "network-only",
-    },
-  );
+  const { data: statsData, refetch: refetchStats } = useQuery(GET_DASHBOARD_STATS, {
+    fetchPolicy: "network-only",
+  });
 
-  // Query do Mural (Polling a cada 15 segundos para monitorar mudanças do AEE)
-  const { data: notificationsData, refetch: refetchNotifications } = useQuery(
-    GET_NOTIFICATIONS,
-    {
-      pollInterval: 60000,
-      fetchPolicy: "network-only",
-    },
-  );
+  // Query do Mural (Polling a cada 60 segundos para poupar o servidor)
+  const { data: notificationsData, refetch: refetchNotifications } = useQuery(GET_NOTIFICATIONS, {
+    pollInterval: 60000,
+    fetchPolicy: "network-only",
+  });
 
   const [markAsRead] = useMutation(MARK_NOTIFICATION_AS_READ);
 
@@ -71,6 +63,7 @@ export default function Dashboard() {
       console.error("Erro ao marcar notificação:", e);
     }
   };
+
   /* ================= PROCESSAMENTO DE DADOS ================= */
 
   // Faz o parse do JSON vindo do Django e define valores padrão para evitar erros
@@ -79,7 +72,8 @@ export default function Dashboard() {
       totalStudents: 0,
       totalTeachers: 0,
       notificationsCount: 0,
-      activity: [],
+      pendingPeis: 0, // Novo: Radar de PEIs Pendentes
+      invisibleStudents: 0, // Novo: Termômetro de Invisíveis
       totalSubjects: 0,
       totalClasses: 0,
       totalCourses: 0,
@@ -96,28 +90,12 @@ export default function Dashboard() {
       return {
         ...defaultStats,
         ...parsed,
-        activity:
-          parsed.activity?.map((a) => ({
-            ...a,
-            value: Number(a.value),
-          })) || [],
       };
     } catch (e) {
       console.error("Erro no processamento das estatísticas:", e);
       return defaultStats;
     }
   }, [statsData]);
-
-  // Calcula as porcentagens das barras do gráfico de atividade
-  const chartData = useMemo(() => {
-    const rawActivity = stats.activity || [];
-    const maxVal = Math.max(...rawActivity.map((a) => a.value), 1);
-
-    return rawActivity.map((item) => ({
-      ...item,
-      percentage: Math.max((item.value / maxVal) * 100, 5),
-    }));
-  }, [stats]);
 
   const notifications = notificationsData?.myNotifications || [];
   const isTeacher = user?.userType === "teacher";
@@ -154,24 +132,25 @@ export default function Dashboard() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
             {isTeacher ? (
               <>
+                {/* Professor vê os PEIs pendentes */}
                 <StatCard
-                  title="Minhas Turmas"
-                  value={stats.totalClasses}
-                  detail="Turmas vinculadas"
-                  icon="🏫"
-                  color="indigo"
+                  title="Planos Pendentes"
+                  value={stats.pendingPeis}
+                  detail="Falta criar ou atualizar PEI"
+                  icon="⚠️"
+                  color={stats.pendingPeis > 0 ? "red" : "emerald"}
                 />
                 <StatCard
                   title="Minhas Disciplinas"
                   value={stats.totalSubjects}
                   detail="Componentes ativos"
                   icon="📘"
-                  color="emerald"
+                  color="indigo"
                 />
                 <StatCard
                   title="Alertas"
                   value={stats.notificationsCount}
-                  detail="Atualizações de Dossiês"
+                  detail="Atualizações não lidas"
                   icon="🔔"
                   color="blue"
                 />
@@ -185,56 +164,23 @@ export default function Dashboard() {
                   icon="🎓"
                   color="indigo"
                 />
+                {/* Gestão vê os alunos invisíveis */}
                 <StatCard
-                  title="Corpo Docente"
-                  value={stats.totalTeachers}
-                  detail="Professores ativos"
-                  icon="👥"
-                  color="emerald"
+                  title="Alunos Invisíveis"
+                  value={stats.invisibleStudents}
+                  detail="Sem acompanhamento > 15 dias"
+                  icon="🧊"
+                  color={stats.invisibleStudents > 0 ? "amber" : "emerald"}
                 />
                 <StatCard
-                  title="Total Alertas"
-                  value={notifications.length}
-                  detail="Notificações institucionais"
+                  title="Alertas Não Lidos"
+                  value={stats.notificationsCount} 
+                  detail="Avisos do mural"
                   icon="🔔"
                   color="blue"
                 />
               </>
             )}
-          </div>
-
-          {/* GRÁFICO DE ATIVIDADE */}
-          <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 mb-10">
-            <h2 className="text-lg font-black text-slate-800 italic mb-6 ml-2">
-              Engajamento Pedagógico
-            </h2>
-
-            <div className="w-full overflow-x-auto">
-              <div className="flex items-end gap-6 h-64 px-2 min-w-[500px]">
-                {chartData.map((item, index) => (
-                  <div
-                    key={index}
-                    className="flex flex-col items-center flex-1"
-                  >
-                    <span className="text-xs font-black text-slate-400 mb-2">
-                      {item.value}
-                    </span>
-                    <div className="w-full flex justify-center">
-                      <div
-                        className="w-10 bg-indigo-500 rounded-2xl transition-all duration-700 hover:bg-indigo-600 shadow-lg shadow-indigo-100"
-                        style={{
-                          height: `${item.percentage}%`,
-                          minHeight: "12px",
-                        }}
-                      />
-                    </div>
-                    <span className="text-[10px] text-slate-400 mt-3 font-black uppercase tracking-tighter">
-                      {item.label}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
           </div>
 
           {/* MURAL DE ATUALIZAÇÕES (NOTIFICAÇÕES DO AEE) */}
@@ -251,7 +197,7 @@ export default function Dashboard() {
             {notifications.length === 0 ? (
               <div className="py-20 text-center">
                 <p className="text-slate-400 font-bold italic">
-                  Nenhuma movimentação pedagógica hoje.
+                  Nenhuma movimentação pedagógica recente.
                 </p>
               </div>
             ) : (
@@ -259,15 +205,14 @@ export default function Dashboard() {
                 {notifications.map((n) => (
                   <div
                     key={n.id}
-                    // Se isRead for true, deixamos o card mais opaco (opacity-60)
                     className={`p-5 rounded-[2rem] border-l-8 transition-all hover:shadow-md relative ${
                       n.isRead ? "opacity-60 grayscale-[50%]" : ""
                     } ${
                       n.changeLevel === "HIGH"
                         ? "bg-red-50 border-red-500 shadow-red-50"
                         : n.changeLevel === "MEDIUM"
-                          ? "bg-amber-50 border-amber-500 shadow-amber-50"
-                          : "bg-slate-50 border-slate-300"
+                        ? "bg-amber-50 border-amber-500 shadow-amber-50"
+                        : "bg-slate-50 border-slate-300"
                     }`}
                   >
                     {/* Botão de Check (Só aparece se NÃO estiver lida) */}
@@ -295,14 +240,16 @@ export default function Dashboard() {
                     </div>
 
                     <p
-                      className={`text-sm font-bold leading-tight mb-4 ${n.isRead ? "text-slate-500" : "text-slate-700"}`}
+                      className={`text-sm font-bold leading-tight mb-4 ${
+                        n.isRead ? "text-slate-500" : "text-slate-700"
+                      }`}
                     >
                       {n.message}
                     </p>
 
                     <div className="flex items-center gap-3 bg-white/50 p-2 rounded-xl w-fit pr-4">
                       <div className="w-8 h-8 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs font-black">
-                        {n.student?.firstName[0]}
+                        {n.student?.firstName?.[0] || "?"}
                       </div>
                       <span className="text-xs font-black text-slate-500 uppercase">
                         {n.student?.firstName} {n.student?.lastName}
@@ -323,15 +270,21 @@ export default function Dashboard() {
 
 function StatCard({ title, value, detail, icon, color }) {
   const colors = {
-    indigo: "text-indigo-600 bg-indigo-50",
-    emerald: "text-emerald-600 bg-emerald-50",
-    blue: "text-blue-600 bg-blue-50",
+    indigo: "text-indigo-600 bg-indigo-50 border-indigo-100",
+    emerald: "text-emerald-600 bg-emerald-50 border-emerald-100",
+    blue: "text-blue-600 bg-blue-50 border-blue-100",
+    red: "text-red-600 bg-red-50 border-red-100",
+    amber: "text-amber-600 bg-amber-50 border-amber-100",
   };
 
+  const bgClasses = colors[color] ? colors[color].split(" ") : colors["indigo"].split(" ");
+
   return (
-    <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm transition-all hover:shadow-md">
+    <div
+      className={`bg-white p-8 rounded-[2.5rem] border ${bgClasses[2]} shadow-sm transition-all hover:shadow-md`}
+    >
       <div
-        className={`w-14 h-14 rounded-2xl flex items-center justify-center text-3xl mb-6 shadow-sm ${colors[color]}`}
+        className={`w-14 h-14 rounded-2xl flex items-center justify-center text-3xl mb-6 shadow-sm ${bgClasses[0]} ${bgClasses[1]}`}
       >
         {icon}
       </div>
