@@ -189,9 +189,6 @@ export default function Dashboard() {
               <h2 className="text-xl font-black text-slate-800 italic text-center md:text-left">
                 Mural de Atualizações
               </h2>
-              <span className="bg-blue-100 text-blue-600 text-[10px] font-black px-4 py-1.5 rounded-full uppercase tracking-widest hidden md:block">
-                Tempo Real
-              </span>
             </div>
 
             {notifications.length === 0 ? (
