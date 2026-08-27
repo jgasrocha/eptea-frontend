@@ -212,7 +212,7 @@ export default function AdaAssistantModal({ isOpen, onClose, studentId, subjectI
                       onClick={() => handlePrint(document.getElementById(`ada-response-${item.id}`).innerHTML)}
                       className="mt-4 flex items-center gap-2 text-[10px] font-black text-slate-400 hover:text-[#00913f] uppercase transition-colors pt-4 border-t border-slate-50 w-full"
                     >
-                      <span>🖨️</span> Exportar Relatório PEI Oficial
+                      <span>🖨️</span> Exportar
                     </button>
                   )}
                 </div>
