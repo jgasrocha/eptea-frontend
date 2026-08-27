@@ -5,7 +5,7 @@ import NavBar from '../../layouts/Navbar';
 import Sidebar from '../../layouts/Sidebar';
 import { useAuth } from "../../context/AuthContext";
 
-// --- QUERY OTIMIZADA ---
+// --- QUERIES E MUTATIONS ---
 const GET_STAFF_DATA = gql`
   query GetStaffData {
     usersByInstitution { id firstName lastName userType username profileImage isActive }
@@ -20,7 +20,6 @@ const CREATE_USER = gql`
   }
 `;
 
-// --- NOVA MUTATION PARA STATUS ---
 const TOGGLE_USER_STATUS = gql`
   mutation ToggleUser($id: ID!, $isActive: Boolean!) {
     toggleUserStatus(id: $id, isActive: $isActive) {
@@ -29,28 +28,41 @@ const TOGGLE_USER_STATUS = gql`
   }
 `;
 
+// --- NOVA MUTATION DE EDIÇÃO DE PAPEL ---
+const UPDATE_STAFF_ROLE = gql`
+  mutation UpdateStaffRole($id: ID!, $userType: String!) {
+    updateStaffRole(id: $id, userType: $userType) {
+      success
+      message
+    }
+  }
+`;
+
 export default function StaffList() {
-  const { user: me, loading: authLoading } = useAuth(); // Usuário global
+  const { user: me, loading: authLoading } = useAuth();
   const { data, loading, refetch, error } = useQuery(GET_STAFF_DATA);
   
   const [createUser] = useMutation(CREATE_USER);
   const [toggleUser] = useMutation(TOGGLE_USER_STATUS);
+  const [updateRole] = useMutation(UPDATE_STAFF_ROLE); // Hook da nova mutation
   
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [showInactiveModal, setShowInactiveModal] = useState(false);
   const [form, setForm] = useState({ reg: '', type: 'teacher' });
 
+  // Estados para o Modal de Edição
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editForm, setEditForm] = useState({ id: '', type: '' });
+
   if (loading || authLoading) return <div className="h-screen flex items-center justify-center font-black text-slate-300 animate-pulse text-xl">EPTEA: CARREGANDO DOCENTES...</div>;
   if (error) return <p className="p-20 text-center text-red-500 font-bold">Erro: {error.message}</p>;
 
-  // Filtra primeiro quem o usuário logado tem permissão para ver
   const allStaff = (data?.usersByInstitution || []).filter(u => {
     if (me?.userType === 'management') return u.userType === 'teacher' || u.userType === 'aee';
     if (me?.userType === 'aee') return u.userType === 'teacher';
     return false;
   });
 
-  // Separa ativos e inativos
   const activeStaff = allStaff.filter(u => u.isActive);
   const inactiveStaff = allStaff.filter(u => !u.isActive);
 
@@ -71,6 +83,25 @@ export default function StaffList() {
     } catch (err) {
       Swal.fire('Erro', err.message, 'error');
     }
+  };
+
+  // --- NOVA FUNÇÃO: SALVAR EDIÇÃO DE PAPEL ---
+  const handleEditRole = async (e) => {
+    e.preventDefault();
+    try {
+      await updateRole({ variables: { id: editForm.id, userType: editForm.type } });
+      Swal.fire('Sucesso!', 'Papel do profissional atualizado.', 'success');
+      setIsEditModalOpen(false);
+      refetch();
+    } catch (err) {
+      Swal.fire('Erro', err.message, 'error');
+    }
+  };
+
+  // Abre o modal preenchendo com os dados atuais do professor
+  const openEditModal = (staff) => {
+    setEditForm({ id: staff.id, type: staff.userType });
+    setIsEditModalOpen(true);
   };
 
   return (
@@ -105,13 +136,24 @@ export default function StaffList() {
             {activeStaff.map(u => (
               <div key={u.id} className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm hover:shadow-xl transition-all group overflow-hidden relative">
                 
-                {/* BOTÃO INATIVAR NO CARD */}
-                <button 
-                  onClick={(e) => { e.stopPropagation(); handleToggleStatus(u.id, false); }} 
-                  className="absolute top-6 right-6 text-red-400 hover:text-red-600 text-[10px] font-black uppercase tracking-widest z-20 transition-colors"
-                >
-                  Inativar
-                </button>
+                {/* BOTÕES DE AÇÃO NO CARD */}
+                <div className="absolute top-6 right-6 flex gap-3 z-20">
+                  {/* Edição de papel permitida apenas para Gestão */}
+                  {me?.userType === 'management' && (
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); openEditModal(u); }} 
+                      className="text-blue-400 hover:text-blue-600 text-[10px] font-black uppercase tracking-widest transition-colors"
+                    >
+                      Editar
+                    </button>
+                  )}
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); handleToggleStatus(u.id, false); }} 
+                    className="text-red-400 hover:text-red-600 text-[10px] font-black uppercase tracking-widest transition-colors"
+                  >
+                    Inativar
+                  </button>
+                </div>
 
                 <div className="flex items-center gap-5">
                   {u.profileImage ? (
@@ -155,6 +197,30 @@ export default function StaffList() {
                   <div className="flex gap-4 pt-4">
                     <button type="submit" className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-bold shadow-lg shadow-blue-100">Confirmar</button>
                     <button type="button" onClick={() => setIsModalOpen(false)} className="flex-1 py-4 bg-slate-100 text-slate-400 rounded-2xl font-bold">Cancelar</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* MODAL EDITAR PROFISSIONAL */}
+          {isEditModalOpen && (
+            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
+              <div className="bg-white w-full max-w-md rounded-[2.5rem] p-10 shadow-2xl animate-in zoom-in duration-200">
+                <h3 className="text-2xl font-black mb-2 text-slate-800">Editar Papel</h3>
+                <p className="text-slate-400 text-xs mb-8 uppercase font-bold tracking-widest">Atualização de Função</p>
+                <form onSubmit={handleEditRole} className="space-y-6">
+                  <select 
+                    className="w-full p-4 bg-slate-50 border-none rounded-2xl font-bold outline-none focus:ring-2 focus:ring-blue-500 shadow-inner" 
+                    value={editForm.type} 
+                    onChange={e => setEditForm({...editForm, type: e.target.value})}
+                  >
+                    <option value="teacher">Professor Regular</option>
+                    <option value="aee">Especialista AEE</option>
+                  </select>
+                  <div className="flex gap-4 pt-4">
+                    <button type="submit" className="flex-1 py-4 bg-emerald-500 text-white rounded-2xl font-bold shadow-lg shadow-emerald-100">Salvar</button>
+                    <button type="button" onClick={() => setIsEditModalOpen(false)} className="flex-1 py-4 bg-slate-100 text-slate-400 rounded-2xl font-bold">Cancelar</button>
                   </div>
                 </form>
               </div>
