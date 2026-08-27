@@ -1,5 +1,5 @@
 import React, { useMemo } from "react";
-import { useQuery, gql } from "@apollo/client";
+import { useQuery, useMutation, gql } from "@apollo/client";
 import NavBar from "../layouts/Navbar";
 import Sidebar from "../layouts/Sidebar";
 import { useAuth } from "../context/AuthContext";
@@ -31,20 +31,46 @@ const GET_NOTIFICATIONS = gql`
   }
 `;
 
+const MARK_NOTIFICATION_AS_READ = gql`
+  mutation MarkAsRead($id: ID!) {
+    markNotificationAsRead(id: $id) {
+      success
+    }
+  }
+`;
+
 export default function Dashboard() {
   const { user, loading: userLoading } = useAuth();
 
   // Query de Estatísticas
-  const { data: statsData } = useQuery(GET_DASHBOARD_STATS, {
-    fetchPolicy: "network-only"
-  });
+  const { data: statsData, refetch: refetchStats } = useQuery(
+    GET_DASHBOARD_STATS,
+    {
+      fetchPolicy: "network-only",
+    },
+  );
 
   // Query do Mural (Polling a cada 15 segundos para monitorar mudanças do AEE)
-  const { data: notificationsData } = useQuery(GET_NOTIFICATIONS, {
-    pollInterval: 15000, 
-    fetchPolicy: "network-only"
-  });
+  const { data: notificationsData, refetch: refetchNotifications } = useQuery(
+    GET_NOTIFICATIONS,
+    {
+      pollInterval: 60000,
+      fetchPolicy: "network-only",
+    },
+  );
 
+  const [markAsRead] = useMutation(MARK_NOTIFICATION_AS_READ);
+
+  const handleMarkAsRead = async (id) => {
+    try {
+      await markAsRead({ variables: { id } });
+      // Atualiza o mural e o contador numérico instantaneamente
+      refetchNotifications();
+      refetchStats();
+    } catch (e) {
+      console.error("Erro ao marcar notificação:", e);
+    }
+  };
   /* ================= PROCESSAMENTO DE DADOS ================= */
 
   // Faz o parse do JSON vindo do Django e define valores padrão para evitar erros
@@ -62,17 +88,19 @@ export default function Dashboard() {
     if (!statsData?.dashboardStats) return defaultStats;
 
     try {
-      const parsed = typeof statsData.dashboardStats === "string"
-        ? JSON.parse(statsData.dashboardStats)
-        : statsData.dashboardStats;
+      const parsed =
+        typeof statsData.dashboardStats === "string"
+          ? JSON.parse(statsData.dashboardStats)
+          : statsData.dashboardStats;
 
       return {
         ...defaultStats,
         ...parsed,
-        activity: parsed.activity?.map((a) => ({
-          ...a,
-          value: Number(a.value),
-        })) || [],
+        activity:
+          parsed.activity?.map((a) => ({
+            ...a,
+            value: Number(a.value),
+          })) || [],
       };
     } catch (e) {
       console.error("Erro no processamento das estatísticas:", e);
@@ -177,17 +205,27 @@ export default function Dashboard() {
 
           {/* GRÁFICO DE ATIVIDADE */}
           <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 mb-10">
-            <h2 className="text-lg font-black text-slate-800 italic mb-6 ml-2">Engajamento Pedagógico</h2>
+            <h2 className="text-lg font-black text-slate-800 italic mb-6 ml-2">
+              Engajamento Pedagógico
+            </h2>
 
             <div className="w-full overflow-x-auto">
               <div className="flex items-end gap-6 h-64 px-2 min-w-[500px]">
                 {chartData.map((item, index) => (
-                  <div key={index} className="flex flex-col items-center flex-1">
-                    <span className="text-xs font-black text-slate-400 mb-2">{item.value}</span>
+                  <div
+                    key={index}
+                    className="flex flex-col items-center flex-1"
+                  >
+                    <span className="text-xs font-black text-slate-400 mb-2">
+                      {item.value}
+                    </span>
                     <div className="w-full flex justify-center">
                       <div
                         className="w-10 bg-indigo-500 rounded-2xl transition-all duration-700 hover:bg-indigo-600 shadow-lg shadow-indigo-100"
-                        style={{ height: `${item.percentage}%`, minHeight: "12px" }}
+                        style={{
+                          height: `${item.percentage}%`,
+                          minHeight: "12px",
+                        }}
                       />
                     </div>
                     <span className="text-[10px] text-slate-400 mt-3 font-black uppercase tracking-tighter">
@@ -212,32 +250,56 @@ export default function Dashboard() {
 
             {notifications.length === 0 ? (
               <div className="py-20 text-center">
-                <p className="text-slate-400 font-bold italic">Nenhuma movimentação pedagógica hoje.</p>
+                <p className="text-slate-400 font-bold italic">
+                  Nenhuma movimentação pedagógica hoje.
+                </p>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {notifications.map((n) => (
                   <div
                     key={n.id}
-                    className={`p-5 rounded-[2rem] border-l-8 transition-all hover:shadow-md ${
-                      n.changeLevel === "HIGH" 
-                        ? "bg-red-50 border-red-500 shadow-red-50" 
-                        : n.changeLevel === "MEDIUM" 
-                          ? "bg-amber-50 border-amber-500 shadow-amber-50" 
+                    // Se isRead for true, deixamos o card mais opaco (opacity-60)
+                    className={`p-5 rounded-[2rem] border-l-8 transition-all hover:shadow-md relative ${
+                      n.isRead ? "opacity-60 grayscale-[50%]" : ""
+                    } ${
+                      n.changeLevel === "HIGH"
+                        ? "bg-red-50 border-red-500 shadow-red-50"
+                        : n.changeLevel === "MEDIUM"
+                          ? "bg-amber-50 border-amber-500 shadow-amber-50"
                           : "bg-slate-50 border-slate-300"
                     }`}
                   >
+                    {/* Botão de Check (Só aparece se NÃO estiver lida) */}
+                    {!n.isRead && (
+                      <button
+                        onClick={() => handleMarkAsRead(n.id)}
+                        className="absolute bottom-5 right-5 w-8 h-8 flex items-center justify-center bg-white rounded-full text-emerald-500 shadow hover:bg-emerald-50 hover:scale-110 transition-all"
+                        title="Marcar como visto"
+                      >
+                        ✔️
+                      </button>
+                    )}
+
                     <div className="flex justify-between items-start mb-3">
                       <span className="text-[10px] font-black uppercase text-slate-400 tracking-tighter">
-                        {new Date(n.createdAt).toLocaleDateString()} • {new Date(n.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        {new Date(n.createdAt).toLocaleDateString()} •{" "}
+                        {new Date(n.createdAt).toLocaleTimeString([], {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
                       </span>
-                      {n.changeLevel === "HIGH" && <span className="text-red-500 animate-pulse">⚠️</span>}
+                      {n.changeLevel === "HIGH" && !n.isRead && (
+                        <span className="text-red-500 animate-pulse">⚠️</span>
+                      )}
                     </div>
-                    
-                    <p className="text-sm font-bold text-slate-700 leading-tight mb-4">
+
+                    <p
+                      className={`text-sm font-bold leading-tight mb-4 ${n.isRead ? "text-slate-500" : "text-slate-700"}`}
+                    >
                       {n.message}
                     </p>
-                    
+
                     <div className="flex items-center gap-3 bg-white/50 p-2 rounded-xl w-fit pr-4">
                       <div className="w-8 h-8 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs font-black">
                         {n.student?.firstName[0]}
@@ -268,12 +330,20 @@ function StatCard({ title, value, detail, icon, color }) {
 
   return (
     <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm transition-all hover:shadow-md">
-      <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-3xl mb-6 shadow-sm ${colors[color]}`}>
+      <div
+        className={`w-14 h-14 rounded-2xl flex items-center justify-center text-3xl mb-6 shadow-sm ${colors[color]}`}
+      >
         {icon}
       </div>
-      <p className="text-5xl font-black text-slate-800 tracking-tighter mb-1">{value}</p>
-      <p className="text-xs font-black text-slate-400 uppercase tracking-widest">{title}</p>
-      <p className="text-[10px] text-slate-300 font-bold italic mt-2">{detail}</p>
+      <p className="text-5xl font-black text-slate-800 tracking-tighter mb-1">
+        {value}
+      </p>
+      <p className="text-xs font-black text-slate-400 uppercase tracking-widest">
+        {title}
+      </p>
+      <p className="text-[10px] text-slate-300 font-bold italic mt-2">
+        {detail}
+      </p>
     </div>
   );
 }
